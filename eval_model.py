@@ -74,6 +74,7 @@ parser.add_argument('--fc-hiddens',
 parser.add_argument('--layers', type=int, default=4, help='# layers in FC.')
 parser.add_argument('--residual', action='store_true', help='ResMade?')
 parser.add_argument('--direct-io', action='store_true', help='Do direct IO?')
+parser.add_argument('--use_ensemble', action='store_true')
 parser.add_argument(
     '--inv-order',
     action='store_true',
@@ -205,16 +206,16 @@ def Query(estimators,
                             vals) if oracle_card is None else oracle_card
     if oracle_card is not None:
         assert card == oracle_card, (card, oracle_card)
-    if card == 0:
-        pprint('Q(', end='')
-        for c, o, v in zip(cols, ops, vals):
-            if o[0] is not None:
-                pprint('{} {} {}, '.format(c.name, o, str(v)), end='')
-        pprint('): ', end='')
-        for est in estimators:
-            if hasattr(est, 'valid_i_list_cache'):
-                est.valid_i_list_cache.append(None)
-        return
+    # if card == 0:
+    #     pprint('Q(', end='')
+    #     for c, o, v in zip(cols, ops, vals):
+    #         if o[0] is not None:
+    #             pprint('{} {} {}, '.format(c.name, o, str(v)), end='')
+    #     pprint('): ', end='')
+    #     for est in estimators:
+    #         if hasattr(est, 'valid_i_list_cache'):
+    #             est.valid_i_list_cache.append(None)
+    #     return
 
     # pprint('\n  actual {} ({:.3f}%) '.format(card,
     #                                          card / table.cardinality * 100),
@@ -451,8 +452,8 @@ def SaveEstimators(path, estimators, return_df=False):
             'query_dur_ms': est.query_dur_ms,
         }
         df = pd.DataFrame(data)
-        df['true_card'].to_csv(
-            f'datasets/{args.dataset}-{args.num_queries}queries-oracle-cards-seed{args.query_seed}.csv', index=False)
+        # df['true_card'].to_csv(
+        #     f'datasets/{args.dataset}-{args.num_queries}queries-oracle-cards-seed{args.query_seed}.csv', index=False)
         results = results.append(df)
     if return_df:
         return results

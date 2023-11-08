@@ -311,7 +311,11 @@ def RunEpoch(split,
                         torch.tensor(1.0 / nsamples, device=logps.device))
                     loss = (-logps).mean()
         if args.use_workloads and not args.independent and split == 'train':
-            q_loss = train_workloads(est, queries, true_cards, inps, valid_i_lists).mean()
+            # q_loss = torch.clamp(train_workloads(est, queries, true_cards, inps, valid_i_lists), max=1e8).mean()
+            q_error = train_workloads(est, queries, true_cards, inps, valid_i_lists)
+            # if train_data.table.name == 'cup98':
+            q_error = q_error[q_error<=1e8]
+            q_loss = q_error.mean()
             # bit2nat
             weighted_q_loss = torch.log2(q_loss+1)*args.q_weight
             # weighted_q_loss = q_loss * args.q_weight

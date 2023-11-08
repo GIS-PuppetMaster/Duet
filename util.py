@@ -10,7 +10,7 @@ gpu_id = 0
 
 
 def get_device():
-    return torch.device(f'cuda:{gpu_id}') if gpu_id>=0 and torch.cuda.is_available() else 'cpu'
+    return torch.device(f'cuda:{gpu_id}') if gpu_id >= 0 and torch.cuda.is_available() else 'cpu'
 
 
 def check_sample(table, tuples, new_tuples, new_preds):
@@ -76,7 +76,8 @@ def SampleTupleThenRandom(all_cols,
                           rng,
                           table,
                           dataset,
-                          return_col_idx=False):
+                          return_col_idx=False,
+                          bound=False):
     s = None
     while s is None or len(s) - pd.isnull(s).astype(int).sum().item() < num_filters:
         s = table.data.iloc[rng.randint(0, table.cardinality)]
@@ -90,6 +91,25 @@ def SampleTupleThenRandom(all_cols,
     while idxs is None or pd.isnull(vals[idxs]).any():
         idxs = rng.choice(len(all_cols), replace=False, size=num_filters)
     cols = np.take(all_cols, idxs)
+    replace_pred = None
+    replace_idx = None
+    original_val = None
+    if bound and table.bounded_col is not None and table.bounded_col in idxs and vals[
+        table.bounded_col] not in table.bounded_distinct_value:
+        replace_val = rng.choice(table.bounded_distinct_value, 1, replace=False)[0]
+        replace_bin = table.columns[table.bounded_col].ValToBin(replace_val)
+        original_val = vals[table.bounded_col]
+        original_bin = table.columns[table.bounded_col].ValToBin(original_val)
+        # 确保选择度不为0
+        replace_idx = np.where(idxs==table.bounded_col)[0]
+        if replace_bin > original_bin:
+            replace_pred = '<='
+        elif replace_bin < original_bin:
+            replace_pred = '>='
+        vals[table.bounded_col] = replace_val
+        # idxs = idxs.tolist()
+        # idxs.remove(table.bounded_col)
+        # idxs = np.array(idxs)
     vals = vals[idxs]
     num_filters = len(vals)
     # If dom size >= 10, okay to place a range filter.
@@ -98,7 +118,8 @@ def SampleTupleThenRandom(all_cols,
     ops_all_eqs = ['='] * num_filters
     sensible_to_do_range = [c.DistributionSize() >= 10 for c in cols]
     ops = np.where(sensible_to_do_range, ops, ops_all_eqs)
-
+    if replace_idx is not None:
+        ops[replace_idx] = replace_pred
     is_range_op = ops != '='
     second_op = [None] * num_filters
     second_vals = [None] * num_filters
@@ -112,12 +133,18 @@ def SampleTupleThenRandom(all_cols,
                 lower_idx = 0
                 if pd.isnull(dvs[0]):
                     lower_idx = 1
-                second_idx = rng.randint(lower_idx, np.where(dvs == vals[i])[0] + 1)[0]
+                if i != replace_idx or original_val is None:
+                    second_idx = rng.randint(lower_idx, np.where(dvs == vals[i])[0] + 1)[0]
+                else:
+                    second_idx = rng.randint(lower_idx, np.where(dvs == original_val)[0] + 1)[0]
                 second_vals[i] = dvs[second_idx]
             elif ops[i] == '>=':
                 second_op[i] = '<='
                 # val<=col<=second_val->val<=second_val
-                second_idx = rng.randint(np.where(dvs == vals[i])[0], len(dvs))[0]
+                if i != replace_idx or original_val is None:
+                    second_idx = rng.randint(np.where(dvs == vals[i])[0], len(dvs))[0]
+                else:
+                    second_idx = rng.randint(np.where(dvs == original_val)[0], len(dvs))[0]
                 second_vals[i] = dvs[second_idx]
     final_ops = []
     for first_op, second_op in zip(ops, second_op):
@@ -140,18 +167,27 @@ def SampleTupleThenRandom(all_cols,
 
     return cols, final_ops, final_vals
 
-
-def GenerateQuery(all_cols, rng, table, dataset, return_col_idx=False, num_filters=None):
+def GenerateQuery(all_cols, rng, table, dataset, return_col_idx=False, num_filters=None, bound=False):
     """Generate a random query."""
     if num_filters is not None:
         num_filters = min(num_filters, len(table.columns))
     else:
         if dataset == 'dmv':
-            num_filters = rng.randint(5, 12)
-        elif dataset == 'census':
-            num_filters = rng.randint(5, 14)
+            if bound:
+                num_filters = np.clip(int(rng.gamma(5, 2)), 1, 11)
+            else:
+                num_filters = rng.randint(5, 12)
         elif dataset == 'cup98':
-            num_filters = rng.randint(4, 13)
+            if bound:
+                num_filters = np.clip(int(rng.gamma(10, 2)), 1, 100)
+            else:
+                # num_filters = np.clip(int(rng.normal(20, 2)), 1, 100)
+                num_filters = rng.randint(5, 101)
+        elif dataset == 'census':
+            if bound:
+                num_filters = np.clip(int(rng.gamma(7, 2)), 1, 13)
+            else:
+                num_filters = rng.randint(5, 14)
         else:
             num_filters = rng.randint(max(1, int(len(table.columns) * 0.3)), len(table.columns))
     cols, ops, vals = SampleTupleThenRandom(all_cols,
@@ -159,7 +195,8 @@ def GenerateQuery(all_cols, rng, table, dataset, return_col_idx=False, num_filte
                                             rng,
                                             table,
                                             dataset=dataset,
-                                            return_col_idx=return_col_idx)
+                                            return_col_idx=return_col_idx,
+                                            bound=bound)
     return [cols, ops, vals]
 
 
@@ -248,7 +285,7 @@ class EvalParam:
                  output_encoding='one_hot',
                  heads=0, blocks=2, dmodel=32, dff=128, transformer_act='gelu', run_sampling=False, run_maxdiff=False,
                  run_bn=False, bn_samples=200,
-                 bn_root=0, maxdiff_limit=30000, tag=None, end_epoch=100, result_tag=None,use_ensemble=False):
+                 bn_root=0, maxdiff_limit=30000, tag=None, end_epoch=100, result_tag=None, use_ensemble=False):
         self.glob = glob
         # only for building model parse, estimator generate ensemble even this is false
         self.use_ensemble = use_ensemble
@@ -298,7 +335,7 @@ class TrainParam:
                  use_workloads=False, independent=False, bs=1024, warmups=0, data_model_warmups=0, epochs=20,
                  constant_lr=None, num_orderings=1, q_weight=1e-2, expand_factor=4, use_ensemble=False):
         self.order = order
-        self.use_ensemble=use_ensemble
+        self.use_ensemble = use_ensemble
         self.expand_factor = expand_factor
         self.gpu_id = gpu_id
         self.num_queries = num_queries

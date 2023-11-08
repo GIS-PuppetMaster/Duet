@@ -210,7 +210,8 @@ class CsvTable(Table):
         else:
             assert (isinstance(filename_or_df, pd.DataFrame))
             self.data = filename_or_df
-
+        self.bounded_distinct_value = None
+        self.bounded_col = None
         self.columns = self._build_columns(self.data, cols, type_casts, pg_cols)
         self.columns_dict = {}
         for c in self.columns:
@@ -331,6 +332,11 @@ class TableDataset(data.Dataset):
             num_samples = len(samples)
             tuples_idxs = torch.as_tensor(samples, dtype=torch.long)
             if self.queries:
+                # queries_idx = np.random.choice(range(len(self.queries[0])), num_samples, replace=False)
+                # queries = [self.queries[0][queries_idx], self.queries[1][queries_idx]]
+                # true_cards = self.true_cards[queries_idx]
+                # wild_card_mask = self.wild_card_mask[queries_idx].to(self.device, non_blocking=True)
+                # inps = self.inp[queries_idx].to(self.device, non_blocking=True)
                 query_start = np.random.randint(len(self.queries[0]))
                 query_end = query_start + num_samples
                 if query_end > len(self.queries[0]):
@@ -346,7 +352,7 @@ class TableDataset(data.Dataset):
                     else:
                         s = self.model.input_bins_encoded_cumsum[i - 1]
                     e = self.model.input_bins_encoded_cumsum[i]
-                    # torch与numpybutong，mask与slice合用时mask只能为一维向量
+                    # torch与numpy不同，mask与slice合用时mask只能为一维向量
                     if isinstance(self.model, made.MADE):
                         pred_shift = 5
                     else:
@@ -355,6 +361,7 @@ class TableDataset(data.Dataset):
                     inps[wild_card_mask[:, 1, i], 1, s:e - pred_shift] = 0
                     inps[..., s:e-pred_shift] = inps[..., s:e-pred_shift] + wild_card_mask.narrow(-1, i, 1).float() * self.model.unk_embeddings[i]
                 valid_i_lists = [self.valid_i_list[i][query_start:query_end] for i in range(len(self.valid_i_list))]
+                # valid_i_lists = [self.valid_i_list[i][queries_idx] for i in range(len(self.valid_i_list))]
 
             tuples = self.tuples[tuples_idxs]
             if self.expand_factor>1:
