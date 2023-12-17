@@ -232,7 +232,7 @@ class DirectEstimator(CardEst):
                 self.model.unk_embeddings = self.model.unk_embeddings.cpu()
         if self.is_made:
             self.inp = torch.tile(
-                torch.cat([self.model.unk_embedding_pred_cache[natural_idx] for natural_idx in self.model.m[-1]],
+                torch.cat([self.model.unk_embedding_pred_cache[natural_idx] for natural_idx in util.InvertOrder(self.model.m[-1])],
                           dim=-1).unsqueeze(1), dims=(1, 2, 1))
             # self.inp = torch.zeros((batch_size, 2, np.array(self.model.input_bins_encoded).sum())).pin_memory()
         else:
